@@ -1,1 +1,1 @@
-worker: python simple_bot.py
+worker: python cloud_prediction_bot.py
