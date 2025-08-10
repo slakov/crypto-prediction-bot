@@ -17,17 +17,20 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Setup clean production logging
+# Setup ultra-clean production logging - suppress all library noise
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.WARNING  # Only show warnings and errors
+    format='%(asctime)s - %(message)s',
+    level=logging.ERROR  # Only show actual errors
 )
 logger = logging.getLogger(__name__)
 
-# Reduce noise from external libraries
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('telegram').setLevel(logging.WARNING)
-logging.getLogger('urllib3').setLevel(logging.WARNING)
+# Silence all external library logging
+logging.getLogger('httpx').setLevel(logging.CRITICAL)
+logging.getLogger('telegram').setLevel(logging.CRITICAL)
+logging.getLogger('urllib3').setLevel(logging.CRITICAL)
+logging.getLogger('telegram.ext').setLevel(logging.CRITICAL)
+logging.getLogger('telegram.ext.Application').setLevel(logging.CRITICAL)
+logging.getLogger('telegram.ext.Updater').setLevel(logging.CRITICAL)
 
 # Bot configuration - Load from environment or local config
 BOT_TOKEN = os.getenv("BOT_TOKEN")
