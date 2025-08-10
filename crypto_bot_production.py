@@ -17,12 +17,17 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Setup logging
+# Setup clean production logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.WARNING  # Only show warnings and errors
 )
 logger = logging.getLogger(__name__)
+
+# Reduce noise from external libraries
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # Bot configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE")
@@ -126,12 +131,15 @@ class CryptoPredictionEngine:
             if current_time - self.last_update < 300 and self.cached_data:
                 data = self.cached_data
             else:
+                logger.info("Fetching fresh market data...")
                 data = self.get_coingecko_data(120)
                 if data:
                     self.cached_data = data
                     self.last_update = current_time
+                    logger.info(f"Successfully loaded {len(data)} coins")
                 else:
                     data = self.cached_data if self.cached_data else []
+                    logger.warning("Failed to fetch fresh data, using cache")
             
             if not data:
                 return {"count": 0, "error": "Market data unavailable"}
@@ -519,8 +527,9 @@ def main():
         print("❌ Please set your BOT_TOKEN environment variable")
         return
     
-    print("🚀 Starting Crypto Prediction Bot...")
-    print("Press Ctrl+C to stop")
+    print("🚀 Crypto Prediction Bot - Production Mode")
+    print("📊 Clean logging enabled - Only warnings/errors shown")
+    print("✅ Bot starting...")
     
     # Create application
     application = Application.builder().token(BOT_TOKEN).build()
@@ -532,6 +541,7 @@ def main():
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Start the bot
+    print("✅ Bot online - Clean logs active")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
