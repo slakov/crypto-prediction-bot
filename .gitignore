@@ -55,6 +55,7 @@ eval_interim.csv
 # SECURITY: Never commit sensitive data
 .env
 .env.*
+local_config.json
 config.json
 secrets.json
 *token*
