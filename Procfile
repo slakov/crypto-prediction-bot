@@ -1,1 +1,1 @@
-worker: python cloud_prediction_bot.py
+worker: python crypto_bot_production.py

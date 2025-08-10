@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python cloud_prediction_bot.py"
+startCommand = "python crypto_bot_production.py"
 restartPolicyType = "always"
 
 [variables]
