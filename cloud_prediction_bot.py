@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 class SimpleCryptoPredictionEngine:
     """Simplified prediction engine for cloud deployment"""
@@ -485,8 +485,9 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Please set your BOT_TOKEN environment variable")
+    if not BOT_TOKEN:
+        print("❌ SECURITY ERROR: BOT_TOKEN environment variable not set")
+        print("💡 Set your bot token as an environment variable for security")
         return
     
     print("🚀 Starting Live Crypto Prediction Bot...")

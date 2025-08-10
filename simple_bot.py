@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 def get_demo_predictions(top_n: int = 5) -> Dict:
     """Generate demo predictions for testing"""
@@ -312,8 +312,8 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Please set your BOT_TOKEN environment variable")
+    if not BOT_TOKEN:
+        print("❌ SECURITY ERROR: BOT_TOKEN environment variable not set")
         return
     
     print("🚀 Starting Simple Crypto Prediction Bot...")

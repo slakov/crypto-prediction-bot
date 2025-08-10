@@ -51,3 +51,12 @@ scale_calibration.json
 # Temporary prediction files
 predictions_*.csv
 eval_interim.csv
+
+# SECURITY: Never commit sensitive data
+.env
+.env.*
+config.json
+secrets.json
+*token*
+*key*
+*secret*
