@@ -136,11 +136,49 @@ class CryptoPredictionEngine:
             if not data:
                 return {"count": 0, "error": "Market data unavailable"}
             
-            # Stablecoins to exclude
-            stablecoins = {
+            # Coins to exclude
+            excluded_coins = {
+                # Stablecoins
                 'USDT', 'USDC', 'BUSD', 'DAI', 'FRAX', 'TUSD', 'USDP', 'USDD', 'GUSD', 
                 'PYUSD', 'FDUSD', 'USDE', 'USD1', 'USDY', 'LUSD', 'CRVUSD', 'SUSD',
-                'USDK', 'EURS', 'EURT', 'XSGD', 'ALUSD', 'DOLA', 'USTC', 'UST', 'USDX'
+                'USDK', 'EURS', 'EURT', 'XSGD', 'ALUSD', 'DOLA', 'USTC', 'UST', 'USDX',
+                
+                # Wrapped coins (same price as underlying)
+                'WBTC', 'WETH', 'WBNB', 'WMATIC', 'WAVAX', 'WFTM', 'WSOL', 'WONE',
+                'WHBAR', 'WROSE', 'WMTLX', 'WXRP', 'WADA', 'WDOT', 'WATOM', 'WLUNA',
+                'STETH', 'CBETH', 'RETH', 'ANKR', 'BETH'
+            }
+            
+            # Major exchange listings (Coinbase + Crypto.com focus)
+            major_exchange_coins = {
+                # Top cryptocurrencies (definitely on both exchanges)
+                'BTC', 'ETH', 'ADA', 'XRP', 'SOL', 'DOT', 'MATIC', 'AVAX', 'LINK', 'UNI',
+                'LTC', 'BCH', 'ALGO', 'ATOM', 'XLM', 'ICP', 'VET', 'FIL', 'TRX', 'ETC',
+                'HBAR', 'NEAR', 'MANA', 'SAND', 'CHZ', 'ENJ', 'BAT', 'ZRX', 'COMP', 'MKR',
+                
+                # DeFi tokens (widely supported)
+                'AAVE', 'SNX', 'SUSHI', 'YFI', 'CRV', 'LRC', 'BAL', 'KNC', 'REN', 'UMA',
+                'GRT', 'BAND', 'ANKR', 'STORJ', 'NKN', 'OGN', 'NMR', 'REP', 'SKL', 'NU',
+                
+                # Popular altcoins
+                'SHIB', 'DOGE', 'APE', 'GMT', 'OP', 'ARB', 'BLUR', 'PEPE', 'FLOKI', 'BONK',
+                'WIF', 'RENDER', 'IMX', 'GALA', 'FLOW', 'JASMY', 'ROSE', 'CLV', 'ACH',
+                
+                # Layer 1/2 tokens
+                'APT', 'SUI', 'SEI', 'TIA', 'INJ', 'STRK', 'JTO', 'WLD', 'PYTH', 'JUP',
+                
+                # Recent listings and memecoins
+                'BOME', 'PENGU', 'PNUT', 'GOAT', 'MOODENG', 'PONKE', 'POPCAT', 'BRETT',
+                'NEIRO', 'MOO', 'PUPS', 'WEN', 'MYRO', 'SLERF', 'SMOG', 'BOOK', 'MEW',
+                
+                # Gaming and NFT
+                'AXS', 'MANA', 'SAND', 'ENJ', 'CHZ', 'GALA', 'IMX', 'GODS', 'SUPER',
+                
+                # Infrastructure
+                'FIL', 'AR', 'STORJ', 'GRT', 'RNDR', 'LPT', 'THETA', 'TFUEL',
+                
+                # Enterprise/Business
+                'VET', 'HBAR', 'XDC', 'COTI', 'QNT', 'IOTA', 'MIOTA'
             }
             
             # Generate predictions
@@ -150,10 +188,21 @@ class CryptoPredictionEngine:
                     symbol = coin.get('symbol', '').upper()
                     name = coin.get('name', '').upper()
                     
-                    # Skip stablecoins
-                    if (symbol in stablecoins or 
-                        ('USD' in symbol and len(symbol) <= 6) or
+                    # Skip excluded coins (stablecoins + wrapped coins)
+                    if symbol in excluded_coins:
+                        continue
+                    
+                    # Skip coins with USD patterns (additional stablecoins)
+                    if (('USD' in symbol and len(symbol) <= 6) or
                         'STABLE' in name or 'USD COIN' in name or 'DOLLAR' in name):
+                        continue
+                    
+                    # Skip wrapped coin patterns
+                    if (symbol.startswith('W') and len(symbol) <= 6 and symbol[1:] in major_exchange_coins):
+                        continue
+                    
+                    # Only include coins available on major exchanges
+                    if symbol not in major_exchange_coins:
                         continue
                     
                     prediction = self.prediction_algorithm(coin)
