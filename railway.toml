@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python crypto_bot.py"
+restartPolicyType = "always"
+
+[variables]
+PYTHON_VERSION = "3.12"
