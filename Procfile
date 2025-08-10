@@ -1,1 +1,1 @@
-worker: python crypto_bot_cloud.py
+worker: python simple_bot.py
