@@ -37,7 +37,7 @@ for logger_name in ['telegram', 'telegram.ext']:
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
 # Bot configuration (hard-coded for easy deployment)
-SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
+SERVICE_KEY = "8317782014:AAFbjfwIIl8YGPaJXh9j-cSSxVWdwp_ejhM"
 BOT_TOKEN = SERVICE_KEY
 
 class EnhancedCryptoPredictionEngine:
