@@ -11,7 +11,7 @@ import os
 import requests
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import time
 import random
@@ -169,8 +169,18 @@ class EnhancedCryptoPredictionEngine:
             mcap_scaling = df_result['market_cap'].apply(lambda x: self.compute_mcap_scaling_factor(x))
             df_result['scaled_prediction'] = df_result['ml_prediction'] * mcap_scaling
             
+            # News/Social signals boost (best-effort, resilient)
+            try:
+                signal_map = self.get_news_signals()
+                if signal_map:
+                    df_result['news_boost'] = df_result['symbol'].astype(str).str.upper().map(signal_map).fillna(0.0)
+                else:
+                    df_result['news_boost'] = 0.0
+            except Exception as _e:
+                df_result['news_boost'] = 0.0
+            
             # Final prediction with bounds
-            df_result['final_prediction'] = df_result['scaled_prediction'].clip(-20, 20)
+            df_result['final_prediction'] = (df_result['scaled_prediction'] + df_result.get('news_boost', 0.0)).clip(-20, 20)
             
             return df_result
             
@@ -195,6 +205,55 @@ class EnhancedCryptoPredictionEngine:
         # Micro caps (<$500M) - higher volatility allowed
         else:
             return 1.0
+
+    def get_news_signals(self) -> Dict[str, float]:
+        """
+        Fetch lightweight external signals that often precede price moves:
+        - CoinGecko trending search list (+0.5)
+        - CoinGecko status updates for recent exchange listings within 3 days (+1.5)
+        Returns mapping of SYMBOL -> score.
+        """
+        symbols_to_score: Dict[str, float] = {}
+        now = datetime.utcnow()
+        recent_cutoff = now - timedelta(days=3)
+        
+        # 1) Trending searches
+        try:
+            url = "https://api.coingecko.com/api/v3/search/trending"
+            resp = http_get_with_retries(url, params={}, timeout=10, retries=3, backoff_sec=5.0)
+            if resp is not None and resp.status_code == 200:
+                data = resp.json() or {}
+                coins = data.get('coins', [])
+                for item in coins:
+                    coin = item.get('item', {})
+                    symbol = str(coin.get('symbol', '')).upper()
+                    if symbol:
+                        symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + 0.5
+        except Exception:
+            pass
+        
+        # 2) Recent exchange listings
+        try:
+            url = "https://api.coingecko.com/api/v3/status_updates"
+            params = { 'category': 'exchange_listing', 'per_page': 100, 'page': 1 }
+            resp = http_get_with_retries(url, params=params, timeout=12, retries=3, backoff_sec=6.0)
+            if resp is not None and resp.status_code == 200:
+                data = resp.json() or {}
+                updates = data.get('status_updates', [])
+                for u in updates:
+                    project = u.get('project') or {}
+                    symbol = str(project.get('symbol', '')).upper()
+                    created_at = u.get('created_at')
+                    try:
+                        when = datetime.fromisoformat(created_at.replace('Z', '+00:00')) if created_at else None
+                    except Exception:
+                        when = None
+                    if symbol and when and when.replace(tzinfo=None) >= recent_cutoff:
+                        symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + 1.5
+        except Exception:
+            pass
+        
+        return symbols_to_score
     
     def fallback_prediction_algorithm(self, df: pd.DataFrame) -> pd.DataFrame:
         """Fallback prediction algorithm when ML model is not available"""

@@ -133,6 +133,10 @@ class AdvancedCryptoPredictionModel:
             features_df['rank_log'] = np.log(features_df['market_cap_rank'].clip(lower=1))
             features_df['rank_percentile'] = features_df['market_cap_rank'].rank(pct=True, ascending=False)
         
+        # Optional external news/social signal column support
+        if 'news_boost' in features_df.columns:
+            features_df['news_boost'] = pd.to_numeric(features_df['news_boost'], errors='coerce').fillna(0.0)
+        
         # Technical strength indicators (robust if 1h momentum is missing)
         momentum_1h_safe = features_df['momentum_1h'] if 'momentum_1h' in features_df.columns else 0
         features_df['price_strength'] = (
@@ -178,7 +182,10 @@ class AdvancedCryptoPredictionModel:
                 rank_features.append(col)
         
         # Combine all features
-        all_features = base_features + mcap_features + log_features + rank_features
+        extra_features = []
+        if 'news_boost' in df.columns:
+            extra_features.append('news_boost')
+        all_features = base_features + mcap_features + log_features + rank_features + extra_features
         
         # Filter to only include features that exist in the dataframe
         available_features = [f for f in all_features if f in df.columns]
