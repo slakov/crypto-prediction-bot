@@ -21,6 +21,29 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import BadRequest
 
+# Simple HTTP GET with retries/backoff to mitigate CoinGecko 429s
+def http_get_with_retries(url: str, params: Dict[str, Any], timeout: int = 15, retries: int = 4, backoff_sec: float = 6.0):
+    last_exc = None
+    headers = {"User-Agent": "zpredbot/1.0 (+https://github.com/slakov/crypto-prediction-bot)"}
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout, headers=headers)
+            if resp.status_code == 429:
+                wait = backoff_sec * (attempt + 1)
+                print(f"⚠️  Rate limited (429). Backing off {wait:.1f}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_exc = e
+            wait = backoff_sec * (attempt + 1)
+            print(f"⚠️  HTTP error on {url}: {e}. Retrying in {wait:.1f}s...")
+            time.sleep(wait)
+    if last_exc:
+        raise last_exc
+    return None
+
 # Import our improved model (project-local)
 from improved_model import AdvancedCryptoPredictionModel
 
@@ -107,8 +130,8 @@ class EnhancedCryptoPredictionEngine:
                 'price_change_percentage': '1h,24h,7d'
             }
             
-            response = requests.get(url, params=params, timeout=15)
-            if response.status_code == 200:
+            response = http_get_with_retries(url, params, timeout=15, retries=4, backoff_sec=8.0)
+            if response is not None and response.status_code == 200:
                 data = response.json()
                 df = pd.DataFrame(data)
                 
@@ -251,7 +274,7 @@ class EnhancedCryptoPredictionEngine:
                     data = self.cached_data if (hasattr(self, 'cached_data') and self.cached_data is not None and not self.cached_data.empty) else pd.DataFrame()
                     logger.warning("Failed to fetch fresh data, using cache")
             
-            if data.empty:
+            if data is None or (hasattr(data, 'empty') and data.empty):
                 return {"count": 0, "error": "Market data unavailable"}
             
             # Enhanced exclusion lists
