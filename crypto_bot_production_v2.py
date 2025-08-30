@@ -35,9 +35,9 @@ for logger_name in ['httpx', 'urllib3', 'sklearn']:
 for logger_name in ['telegram', 'telegram.ext']:
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
-# Bot configuration (hard-coded for easy deployment)
+# Bot configuration (hard-coded for easy deployment, env override for Railway)
 SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
-BOT_TOKEN = SERVICE_KEY
+BOT_TOKEN = os.getenv("BOT_TOKEN", SERVICE_KEY)
 
 class EnhancedCryptoPredictionEngine:
     """Enhanced crypto prediction engine with advanced ML model"""
