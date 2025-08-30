@@ -19,6 +19,7 @@ import traceback
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import BadRequest
 
 # Import our improved model (project-local)
 from improved_model import AdvancedCryptoPredictionModel
@@ -45,7 +46,7 @@ class EnhancedCryptoPredictionEngine:
     
     def __init__(self):
         self.last_update = 0
-        self.cached_data = {}
+        self.cached_data = None
         self.ml_model = AdvancedCryptoPredictionModel()
         self.model_loaded = False
         self.load_ml_model()
@@ -235,7 +236,7 @@ class EnhancedCryptoPredictionEngine:
         try:
             # Cache for 5 minutes
             current_time = time.time()
-            if current_time - self.last_update < 300 and self.cached_data:
+            if current_time - self.last_update < 300 and self.cached_data is not None and not self.cached_data.empty:
                 data = self.cached_data
             else:
                 logger.info("Fetching fresh market data...")
@@ -247,7 +248,7 @@ class EnhancedCryptoPredictionEngine:
                     self.last_update = current_time
                     logger.info(f"Successfully processed {len(data)} coins with ML model")
                 else:
-                    data = self.cached_data if hasattr(self, 'cached_data') and self.cached_data is not None else pd.DataFrame()
+                    data = self.cached_data if (hasattr(self, 'cached_data') and self.cached_data is not None and not self.cached_data.empty) else pd.DataFrame()
                     logger.warning("Failed to fetch fresh data, using cache")
             
             if data.empty:
@@ -479,29 +480,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     back_keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]]
     back_markup = InlineKeyboardMarkup(back_keyboard)
     
+    async def safe_edit(text: str, reply_markup=None):
+        try:
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        except BadRequest as e:
+            if 'Message is not modified' in str(e):
+                # Append zero-width space to avoid identical content
+                await query.edit_message_text(text + "\u200b", parse_mode='Markdown', reply_markup=reply_markup)
+            else:
+                raise
+
     if query.data == "predict_5":
-        await query.edit_message_text("🔄 Getting top 5 ML predictions...")
+        await safe_edit("🔄 Getting top 5 ML predictions...")
         data = prediction_engine.get_predictions(top_n=5, min_pred=0.0)
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "predict_10":
-        await query.edit_message_text("🔄 Getting top 10 ML predictions...")
+        await safe_edit("🔄 Getting top 10 ML predictions...")
         data = prediction_engine.get_predictions(top_n=10, min_pred=0.0)
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "hot_picks":
-        await query.edit_message_text("🔄 Finding hot picks (>4% predicted)...")
+        await safe_edit("🔄 Finding hot picks (>4% predicted)...")
         data = prediction_engine.get_predictions(top_n=20, min_pred=4.0)
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "moonshots":
-        await query.edit_message_text("🔄 Searching for moonshots (>6% predicted)...")
+        await safe_edit("🔄 Searching for moonshots (>6% predicted)...")
         data = prediction_engine.get_predictions(top_n=25, min_pred=6.0)
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "gainers":
         await query.edit_message_text("🔄 Finding current gainers with ML upside...")
@@ -518,7 +529,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 data = {"count": 0}
         
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "value_picks":
         await query.edit_message_text("🔄 Finding ML value opportunities...")
@@ -537,7 +548,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 data = {"count": 0}
         
         message = format_prediction_message(data)
-        await query.edit_message_text(message, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(message, reply_markup=back_markup)
         
     elif query.data == "status":
         await query.edit_message_text("📊 Checking enhanced bot status...")
@@ -573,7 +584,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Moonshot candidates with high confidence
 """
         
-        await query.edit_message_text(status_msg, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(status_msg, reply_markup=back_markup)
         
     elif query.data == "help":
         help_text = """
@@ -605,7 +616,7 @@ Our bot now uses advanced ML algorithms including Random Forest, Gradient Boosti
 • `/start` - Show main menu
 • `/predict` - Quick top 5 ML predictions
 """
-        await query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=back_markup)
+        await safe_edit(help_text, reply_markup=back_markup)
         
     elif query.data == "refresh" or query.data == "back_to_menu":
         # Return to main menu
@@ -640,7 +651,7 @@ Select what you're looking for:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(welcome_msg, reply_markup=reply_markup, parse_mode='Markdown')
+        await safe_edit(welcome_msg, reply_markup=reply_markup)
 
 async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /predict command"""
