@@ -76,6 +76,9 @@ class EnhancedCryptoPredictionEngine:
         self.ml_model = AdvancedCryptoPredictionModel()
         self.model_loaded = False
         self.load_ml_model()
+        # Lightweight news cache
+        self._news_cache: Dict[str, float] = {}
+        self._news_cache_ts: float = 0.0
         
     def load_ml_model(self):
         """Load the pre-trained ML model"""
@@ -213,9 +216,15 @@ class EnhancedCryptoPredictionEngine:
         """
         Fetch lightweight external signals that often precede price moves:
         - CoinGecko trending search list (+0.5)
-        - CoinGecko status updates for recent exchange listings within 3 days (+1.5)
+        - RSS headlines (Coindesk, Coinbase blog) with listing/ETF keywords (+0.6 to +1.5)
+        Caching: 15 minutes. Non-blocking best-effort – no long retries.
         Returns mapping of SYMBOL -> score.
         """
+        # Serve from cache if fresh
+        now_ts = time.time()
+        if now_ts - self._news_cache_ts < 900 and self._news_cache:
+            return dict(self._news_cache)
+
         symbols_to_score: Dict[str, float] = {}
         now = datetime.utcnow()
         recent_cutoff = now - timedelta(days=3)
@@ -223,7 +232,8 @@ class EnhancedCryptoPredictionEngine:
         # 1) Trending searches
         try:
             url = "https://api.coingecko.com/api/v3/search/trending"
-            resp = http_get_with_retries(url, params={}, timeout=10, retries=3, backoff_sec=5.0)
+            # single attempt to avoid blocking
+            resp = http_get_with_retries(url, params={}, timeout=8, retries=0, backoff_sec=0)
             if resp is not None and resp.status_code == 200:
                 data = resp.json() or {}
                 coins = data.get('coins', [])
@@ -234,32 +244,70 @@ class EnhancedCryptoPredictionEngine:
                         symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + 0.5
         except Exception:
             pass
-        
-        # 2) Recent exchange listings
-        try:
-            url = "https://api.coingecko.com/api/v3/status_updates"
-            params = { 'category': 'general', 'per_page': 100, 'page': 1 }
-            resp = http_get_with_retries(url, params=params, timeout=12, retries=3, backoff_sec=6.0)
-            if resp is not None and resp.status_code == 200:
-                data = resp.json() or {}
-                updates = data.get('status_updates', [])
-                for u in updates:
-                    project = u.get('project') or {}
-                    symbol = str(project.get('symbol', '')).upper()
-                    created_at = u.get('created_at')
-                    try:
-                        when = datetime.fromisoformat(created_at.replace('Z', '+00:00')) if created_at else None
-                    except Exception:
-                        when = None
-                    title = (u.get('title') or '').lower()
-                    desc = (u.get('description') or '').lower()
-                    mention = title + ' ' + desc
-                    is_listing = any(k in mention for k in ['listed on', 'exchange listing', 'now on binance', 'now on coinbase', 'now on kraken'])
-                    if symbol and when and when.replace(tzinfo=None) >= recent_cutoff:
-                        boost = 1.5 if is_listing else 0.6
-                        symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + boost
-        except Exception:
-            pass
+
+        # 2) RSS headlines (fast, low-limit)
+        def parse_rss(url: str) -> List[Dict[str, str]]:
+            try:
+                resp = requests.get(url, timeout=8, headers={"User-Agent": "zpredbot/1.0"})
+                if resp.status_code != 200:
+                    return []
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(resp.text)
+                items = []
+                for item in root.findall('.//item'):
+                    title = (item.findtext('title') or '')
+                    pub = (item.findtext('pubDate') or '')
+                    items.append({"title": title, "pubDate": pub})
+                return items[:50]
+            except Exception:
+                return []
+
+        def map_symbols_from_title(title: str) -> List[str]:
+            title_upper = title.upper()
+            # Common tickers set (subset of major exchanges)
+            major = {
+                'BTC','ETH','SOL','XRP','ADA','DOGE','DOT','AVAX','LINK','UNI','LTC','BCH','ATOM','MATIC','NEAR','FIL','ETC','HBAR','ICP','ALGO','INJ','APT','SUI','SEI','TIA','JUP','WLD','PYTH','RNDR','OP','ARB','SHIB','PEPE','IMX','GRT','AAVE','SNX','YFI','SUSHI','CRV','BAL'
+            }
+            found = []
+            for sym in major:
+                if f' {sym} ' in f' {title_upper} ':
+                    found.append(sym)
+            return found
+
+        rss_sources = [
+            'https://www.coindesk.com/arc/outboundfeeds/rss/',
+            'https://blog.coinbase.com/feed'
+        ]
+        keywords_boost = {
+            'LISTED ON': 1.5,
+            'LISTING': 1.0,
+            'SUPPORTS': 0.8,
+            'ETF': 1.2,
+            'RESERVE': 0.7,
+            'TREASURY': 0.7,
+            'COINBASE': 0.6,
+            'BINANCE': 0.6,
+            'KRAKEN': 0.6
+        }
+
+        for rss in rss_sources:
+            for item in parse_rss(rss):
+                title = item.get('title', '')
+                if not title:
+                    continue
+                syms = map_symbols_from_title(title)
+                base = 0.4
+                extra = 0.0
+                up = title.upper()
+                for k, b in keywords_boost.items():
+                    if k in up:
+                        extra = max(extra, b)
+                for s in syms:
+                    symbols_to_score[s] = symbols_to_score.get(s, 0.0) + base + extra
+
+        # Update cache
+        self._news_cache = dict(symbols_to_score)
+        self._news_cache_ts = now_ts
         
         return symbols_to_score
     
