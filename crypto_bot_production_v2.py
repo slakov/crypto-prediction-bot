@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 for logger_name in ['httpx', 'telegram', 'urllib3', 'telegram.ext', 'telegram.ext.Application', 'telegram.ext.Updater', 'sklearn']:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
-# Bot configuration - Load from environment only
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Bot configuration (hard-coded for easy deployment)
+SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
+BOT_TOKEN = SERVICE_KEY
 
 class EnhancedCryptoPredictionEngine:
     """Enhanced crypto prediction engine with advanced ML model"""
@@ -70,8 +71,8 @@ class EnhancedCryptoPredictionEngine:
             # Fetch current market data
             market_df = fetch_coingecko_data(100)
             if market_df is not None and not market_df.empty:
-                # Create training data
-                training_df = create_synthetic_training_data(market_df, num_samples=1000)
+                # Create training data (increased samples for better generalization)
+                training_df = create_synthetic_training_data(market_df, num_samples=3000)
                 
                 # Train model
                 self.ml_model.train_models(training_df)
@@ -649,10 +650,9 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the enhanced bot"""
-    if not BOT_TOKEN:
-        print("❌ SECURITY ERROR: BOT_TOKEN environment variable not set")
-        print("💡 Set your bot token as an environment variable for security")
-        print("📖 Check deployment documentation for setup instructions")
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("❌ Please set your Telegram bot token in the BOT_TOKEN variable")
+        print("Get a token from @BotFather on Telegram")
         return
     
     print("🚀 Advanced ML Crypto Prediction Bot - Production Mode")

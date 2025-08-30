@@ -11,10 +11,10 @@ import time
 import json
 import os
 from typing import Dict, List, Optional, Tuple, Any
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
 from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+from sklearn.model_selection import TimeSeriesSplit, KFold, cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -84,9 +84,11 @@ class AdvancedCryptoPredictionModel:
         for period in ['1h', '24h', '7d']:
             col = f'price_change_percentage_{period}_in_currency'
             if col in features_df.columns:
-                features_df[f'momentum_{period}'] = features_df[col].fillna(0)
+                features_df[f'momentum_{period}'] = features_df[col].fillna(0).clip(-50, 50)
                 features_df[f'momentum_{period}_abs'] = features_df[f'momentum_{period}'].abs()
                 features_df[f'momentum_{period}_sign'] = np.sign(features_df[f'momentum_{period}'])
+                # Percentile ranks for monotonic transformations
+                features_df[f'momentum_{period}_rank'] = features_df[f'momentum_{period}'].rank(pct=True)
         
         # Cross-period momentum relationships
         if all(col in features_df.columns for col in ['momentum_1h', 'momentum_24h']):
@@ -108,6 +110,9 @@ class AdvancedCryptoPredictionModel:
         else:
             features_df['volume_anomaly'] = 0
             features_df['high_volume_flag'] = 0
+
+        # Rank transform for volume ratio
+        features_df['volume_to_mcap_rank'] = features_df['volume_to_mcap'].rank(pct=True)
         
         # Relative performance vs market leaders
         btc_perf = features_df[features_df['symbol'].str.upper() == 'BTC']['momentum_24h'].iloc[0] if any(features_df['symbol'].str.upper() == 'BTC') else 0
@@ -155,9 +160,14 @@ class AdvancedCryptoPredictionModel:
         log_features = ['price_log', 'market_cap_log', 'volume_log']
         
         # Rank features
-        rank_features = []
+        rank_features = ['volume_to_mcap_rank']
         if 'rank_log' in df.columns:
             rank_features.extend(['rank_log', 'rank_percentile'])
+        # Momentum rank features if present
+        for period in ['1h', '24h', '7d']:
+            col = f'momentum_{period}_rank'
+            if col in df.columns:
+                rank_features.append(col)
         
         # Combine all features
         all_features = base_features + mcap_features + log_features + rank_features
@@ -204,12 +214,17 @@ class AdvancedCryptoPredictionModel:
         X_scaled = self.scaler.fit_transform(X)
         X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols, index=X.index)
         
-        # Initialize models
+        # Initialize base models
+        rf_model = RandomForestRegressor(**self.rf_params)
+        gb_model = GradientBoostingRegressor(**self.gb_params)
+        ridge_model = Ridge(**self.ridge_params)
+        elastic_model = ElasticNet(**self.elastic_params)
+
         self.models = {
-            'rf': RandomForestRegressor(**self.rf_params),
-            'gb': GradientBoostingRegressor(**self.gb_params),
-            'ridge': Ridge(**self.ridge_params),
-            'elastic': ElasticNet(**self.elastic_params)
+            'rf': rf_model,
+            'gb': gb_model,
+            'ridge': ridge_model,
+            'elastic': elastic_model
         }
         
         # Train models and evaluate
@@ -232,6 +247,31 @@ class AdvancedCryptoPredictionModel:
             except Exception as e:
                 print(f"❌ Failed to train {name}: {e}")
                 scores[name] = float('inf')
+
+        # Stacking meta-learner using out-of-fold predictions
+        try:
+            base_estimators = [
+                ('rf', rf_model),
+                ('gb', gb_model),
+                ('ridge', ridge_model),
+                ('elastic', elastic_model)
+            ]
+            meta_learner = Ridge(alpha=0.5, random_state=42)
+            stacking_reg = StackingRegressor(
+                estimators=base_estimators,
+                final_estimator=meta_learner,
+                cv=KFold(n_splits=min(5, max(2, len(X) // 50)), shuffle=False),
+                passthrough=False,
+                n_jobs=None
+            )
+            stacking_reg.fit(X_scaled_df, y)
+            self.models['stack'] = stacking_reg
+            # Cross-validated MAE for stack
+            cv_scores_stack = cross_val_score(stacking_reg, X_scaled_df, y, cv=tscv, scoring='neg_mean_absolute_error')
+            scores['stack'] = -cv_scores_stack.mean()
+            print(f"✅ STACK: MAE = {scores['stack']:.3f}")
+        except Exception as e:
+            print(f"⚠️  Failed to train stacking meta-learner: {e}")
         
         # Update model weights based on performance
         if scores:
@@ -576,7 +616,7 @@ def main():
             print(f"   {feature}: {score:.4f}")
     
     # Save model
-    model_path = "/Users/xfx/Desktop/trade/improved_crypto_model.pkl"
+    model_path = os.path.join(os.path.dirname(__file__), "improved_crypto_model.pkl")
     model.save_model(model_path)
     
     print(f"\n✅ Model training completed and saved to {model_path}")

@@ -27,8 +27,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Bot configuration (hard-coded for easy deployment)
+SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
+BOT_TOKEN = SERVICE_KEY
 # Removed user restrictions - bot is now public for friends
 # AUTHORIZED_USERS = [181441247]  # Commented out for public access
 AUTHORIZED_USERS = []  # Empty list = allow all users
