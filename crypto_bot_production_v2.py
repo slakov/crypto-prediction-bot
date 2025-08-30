@@ -656,6 +656,18 @@ def main():
         print("❌ Please set your Telegram bot token in the BOT_TOKEN variable")
         print("Get a token from @BotFather on Telegram")
         return
+
+    # Validate token upfront for clearer errors in Railway logs
+    try:
+        resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10)
+        data = resp.json() if resp.ok else {}
+        if not data.get("ok"):
+            print("❌ Telegram token validation failed.\n→ Check that the token is valid/regenerated.")
+            print(f"Details: status={resp.status_code}, body={data}")
+            return
+    except Exception as e:
+        print(f"❌ Telegram token validation error: {e}")
+        return
     
     print("🚀 Advanced ML Crypto Prediction Bot - Production Mode")
     print("🧠 Enhanced with machine learning models")
