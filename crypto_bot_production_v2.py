@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import time
 import random
+import traceback
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -683,7 +684,12 @@ def main():
     
     # Start the bot
     print("✅ Enhanced ML Bot online - Clean logs active")
-    application.run_polling(drop_pending_updates=True)
+    try:
+        application.run_polling(drop_pending_updates=True)
+    except Exception:
+        print("\n❌ Unhandled exception in polling loop:")
+        traceback.print_exc()
+        raise
 
 if __name__ == '__main__':
     main()
