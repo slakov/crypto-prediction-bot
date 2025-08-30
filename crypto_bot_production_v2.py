@@ -19,9 +19,7 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Import our improved model
-import sys
-sys.path.append('/Users/xfx/Desktop/trade')
+# Import our improved model (project-local)
 from improved_model import AdvancedCryptoPredictionModel
 
 # Setup ultra-clean production logging - suppress all library noise
@@ -35,20 +33,8 @@ logger = logging.getLogger(__name__)
 for logger_name in ['httpx', 'telegram', 'urllib3', 'telegram.ext', 'telegram.ext.Application', 'telegram.ext.Updater', 'sklearn']:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
 
-# Bot configuration - Load from environment or local config
+# Bot configuration - Load from environment only
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# Fallback for local development (remove this in production)
-if not BOT_TOKEN:
-    try:
-        # Try to load from local config file (not committed to git)
-        import json
-        with open('/Users/xfx/Desktop/trade/local_config.json', 'r') as f:
-            config = json.load(f)
-            BOT_TOKEN = config.get('BOT_TOKEN')
-    except FileNotFoundError:
-        # If no local config, use Railway environment variable
-        BOT_TOKEN = "8317782014:AAFbjfwIIl8YGPaJXh9j-cSSxVWdwp_ejhM"
 
 class EnhancedCryptoPredictionEngine:
     """Enhanced crypto prediction engine with advanced ML model"""
@@ -62,7 +48,7 @@ class EnhancedCryptoPredictionEngine:
         
     def load_ml_model(self):
         """Load the pre-trained ML model"""
-        model_path = "/Users/xfx/Desktop/trade/improved_crypto_model.pkl"
+        model_path = os.path.join(os.path.dirname(__file__), "improved_crypto_model.pkl")
         try:
             if os.path.exists(model_path):
                 self.ml_model.load_model(model_path)
@@ -91,8 +77,8 @@ class EnhancedCryptoPredictionEngine:
                 self.ml_model.train_models(training_df)
                 self.model_loaded = True
                 
-                # Save model
-                model_path = "/Users/xfx/Desktop/trade/improved_crypto_model.pkl"
+                # Save model next to this script for reuse in deployments
+                model_path = os.path.join(os.path.dirname(__file__), "improved_crypto_model.pkl")
                 self.ml_model.save_model(model_path)
                 
                 logger.info("✅ Fresh ML model trained and saved")

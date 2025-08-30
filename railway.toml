@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python crypto_bot_production.py"
+startCommand = "python crypto_bot_production_v2.py"
 restartPolicyType = "always"
 
 [variables]

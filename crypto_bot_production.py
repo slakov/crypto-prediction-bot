@@ -32,20 +32,8 @@ logging.getLogger('telegram.ext').setLevel(logging.CRITICAL)
 logging.getLogger('telegram.ext.Application').setLevel(logging.CRITICAL)
 logging.getLogger('telegram.ext.Updater').setLevel(logging.CRITICAL)
 
-# Bot configuration - Load from environment or local config
+# Bot configuration - Load from environment only
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# Fallback for local development (remove this in production)
-if not BOT_TOKEN:
-    try:
-        # Try to load from local config file (not committed to git)
-        import json
-        with open('/Users/xfx/Desktop/trade/local_config.json', 'r') as f:
-            config = json.load(f)
-            BOT_TOKEN = config.get('BOT_TOKEN')
-    except FileNotFoundError:
-        # If no local config, use Railway environment variable
-        BOT_TOKEN = "8317782014:AAFbjfwIIl8YGPaJXh9j-cSSxVWdwp_ejhM"
 
 class CryptoPredictionEngine:
     """Production crypto prediction engine"""
