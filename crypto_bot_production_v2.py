@@ -28,6 +28,9 @@ def http_get_with_retries(url: str, params: Dict[str, Any], timeout: int = 15, r
     for attempt in range(retries):
         try:
             resp = requests.get(url, params=params, timeout=timeout, headers=headers)
+            if resp.status_code == 404:
+                # Endpoint not available – do not retry
+                return resp
             if resp.status_code == 429:
                 wait = backoff_sec * (attempt + 1)
                 print(f"⚠️  Rate limited (429). Backing off {wait:.1f}s...")
@@ -235,7 +238,7 @@ class EnhancedCryptoPredictionEngine:
         # 2) Recent exchange listings
         try:
             url = "https://api.coingecko.com/api/v3/status_updates"
-            params = { 'category': 'exchange_listing', 'per_page': 100, 'page': 1 }
+            params = { 'category': 'general', 'per_page': 100, 'page': 1 }
             resp = http_get_with_retries(url, params=params, timeout=12, retries=3, backoff_sec=6.0)
             if resp is not None and resp.status_code == 200:
                 data = resp.json() or {}
@@ -248,8 +251,13 @@ class EnhancedCryptoPredictionEngine:
                         when = datetime.fromisoformat(created_at.replace('Z', '+00:00')) if created_at else None
                     except Exception:
                         when = None
+                    title = (u.get('title') or '').lower()
+                    desc = (u.get('description') or '').lower()
+                    mention = title + ' ' + desc
+                    is_listing = any(k in mention for k in ['listed on', 'exchange listing', 'now on binance', 'now on coinbase', 'now on kraken'])
                     if symbol and when and when.replace(tzinfo=None) >= recent_cutoff:
-                        symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + 1.5
+                        boost = 1.5 if is_listing else 0.6
+                        symbols_to_score[symbol] = symbols_to_score.get(symbol, 0.0) + boost
         except Exception:
             pass
         
@@ -556,7 +564,14 @@ Select what you're looking for:
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks"""
     query = update.callback_query
-    await query.answer()
+    # Answer quickly; ignore 'query is too old' errors
+    try:
+        await query.answer()
+    except BadRequest as e:
+        if 'query is too old' in str(e).lower() or 'timeout expired' in str(e).lower():
+            pass
+        else:
+            raise
     
     # Create back button
     back_keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]]
