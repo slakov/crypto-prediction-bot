@@ -35,9 +35,9 @@ for logger_name in ['httpx', 'urllib3', 'sklearn']:
 for logger_name in ['telegram', 'telegram.ext']:
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
-# Bot configuration (hard-coded for easy deployment, env override for Railway)
+# Bot configuration (hard-coded for easy deployment)
 SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
-BOT_TOKEN = os.getenv("BOT_TOKEN", SERVICE_KEY)
+BOT_TOKEN = SERVICE_KEY
 
 class EnhancedCryptoPredictionEngine:
     """Enhanced crypto prediction engine with advanced ML model"""
@@ -657,17 +657,7 @@ def main():
         print("Get a token from @BotFather on Telegram")
         return
 
-    # Validate token upfront for clearer errors in Railway logs
-    try:
-        resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10)
-        data = resp.json() if resp.ok else {}
-        if not data.get("ok"):
-            print("❌ Telegram token validation failed.\n→ Check that the token is valid/regenerated.")
-            print(f"Details: status={resp.status_code}, body={data}")
-            return
-    except Exception as e:
-        print(f"❌ Telegram token validation error: {e}")
-        return
+    # Proceed directly with hard-coded token (legacy behavior)
     
     print("🚀 Advanced ML Crypto Prediction Bot - Production Mode")
     print("🧠 Enhanced with machine learning models")
