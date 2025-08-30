@@ -10,6 +10,7 @@ import requests
 import time
 import json
 import os
+import argparse
 from typing import Dict, List, Optional, Tuple, Any
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
 from sklearn.linear_model import Ridge, ElasticNet
@@ -91,9 +92,15 @@ class AdvancedCryptoPredictionModel:
                 features_df[f'momentum_{period}_rank'] = features_df[f'momentum_{period}'].rank(pct=True)
         
         # Cross-period momentum relationships
-        if all(col in features_df.columns for col in ['momentum_1h', 'momentum_24h']):
-            features_df['momentum_acceleration'] = features_df['momentum_1h'] - (features_df['momentum_24h'] / 24)
-            features_df['momentum_consistency'] = (features_df['momentum_1h'] * features_df['momentum_24h'] > 0).astype(int)
+        if 'momentum_24h' in features_df.columns:
+            if 'momentum_1h' in features_df.columns:
+                features_df['momentum_acceleration'] = features_df['momentum_1h'] - (features_df['momentum_24h'] / 24)
+                features_df['momentum_consistency'] = (features_df['momentum_1h'] * features_df['momentum_24h'] > 0).astype(int)
+            else:
+                # Fallback acceleration estimate from 7d trend if 1h is missing
+                base_7d = features_df['momentum_7d'] if 'momentum_7d' in features_df.columns else 0
+                features_df['momentum_acceleration'] = - (features_df['momentum_24h'] / 24) + (base_7d if isinstance(base_7d, pd.Series) else 0) / 7
+                features_df['momentum_consistency'] = (features_df['momentum_24h'] > 0).astype(int)
         
         # Market cap tiers (one-hot encoded)
         mcap_tiers = pd.cut(features_df['market_cap'], 
@@ -126,10 +133,11 @@ class AdvancedCryptoPredictionModel:
             features_df['rank_log'] = np.log(features_df['market_cap_rank'].clip(lower=1))
             features_df['rank_percentile'] = features_df['market_cap_rank'].rank(pct=True, ascending=False)
         
-        # Technical strength indicators
+        # Technical strength indicators (robust if 1h momentum is missing)
+        momentum_1h_safe = features_df['momentum_1h'] if 'momentum_1h' in features_df.columns else 0
         features_df['price_strength'] = (
             0.4 * features_df['momentum_24h'].fillna(0) +
-            0.3 * features_df['momentum_1h'].fillna(0) + 
+            0.3 * momentum_1h_safe if isinstance(momentum_1h_safe, pd.Series) else 0 +
             0.2 * features_df['volume_anomaly'] +
             0.1 * features_df['outperform_btc']
         )
@@ -440,6 +448,128 @@ def fetch_coingecko_data(limit: int = 100) -> Optional[pd.DataFrame]:
         return None
 
 
+def _get_with_retries(url: str, params: Dict[str, Any], timeout: int = 20, retries: int = 3, backoff_sec: float = 5.0):
+    """HTTP GET with basic retry/backoff for rate limiting (429) and transient errors."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            if resp.status_code == 429:
+                # Rate limited - back off then retry
+                wait = backoff_sec * (attempt + 1)
+                print(f"⚠️  Rate limited (429) on {url}. Backing off {wait:.1f}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_exc = e
+            wait = backoff_sec * (attempt + 1)
+            print(f"⚠️  HTTP error on {url}: {e}. Retrying in {wait:.1f}s...")
+            time.sleep(wait)
+    if last_exc:
+        raise last_exc
+    return None
+
+
+def fetch_top_coins(limit: int = 50) -> Optional[pd.DataFrame]:
+    """
+    Fetch top coins (by market cap) with id/symbol/name for historical backtesting
+    """
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': limit,
+            'page': 1,
+            'sparkline': False
+        }
+        response = _get_with_retries(url, params, timeout=20, retries=4, backoff_sec=8.0)
+        df = pd.DataFrame(response.json()) if response is not None else pd.DataFrame()
+        if df.empty:
+            return None
+        return df[['id', 'symbol', 'name']]
+    except Exception as e:
+        print(f"❌ Error fetching top coins: {e}")
+        return None
+
+
+def fetch_coin_market_chart(coin_id: str, days: int = 90) -> Optional[Dict[str, List[List[float]]]]:
+    """
+    Fetch daily market chart for a coin (prices, market_caps, total_volumes)
+    """
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+        params = {
+            'vs_currency': 'usd',
+            'days': days,
+            'interval': 'daily'
+        }
+        response = _get_with_retries(url, params, timeout=20, retries=4, backoff_sec=8.0)
+        return response.json() if response is not None else None
+    except Exception as e:
+        print(f"⚠️  Error fetching market chart for {coin_id}: {e}")
+        return None
+
+
+def build_historical_dataset(days: int = 90, top_n: int = 25, throttle_sec: float = 0.6) -> Optional[pd.DataFrame]:
+    """
+    Build a historical supervised dataset from CoinGecko daily data.
+    Target: next-day percentage change.
+    Features base: momentum (24h, 7d), volume to mcap, logs, rank; model's engineer_features() adds more.
+    """
+    top_df = fetch_top_coins(limit=top_n)
+    if top_df is None or top_df.empty:
+        return None
+    all_rows: List[Dict[str, Any]] = []
+    symbol_name_map = {row['id']: (row['symbol'], row['name']) for _, row in top_df.iterrows()}
+    charts: Dict[str, Dict[str, List[List[float]]]] = {}
+    for coin_id in top_df['id'].tolist():
+        data = fetch_coin_market_chart(coin_id, days=days + 8)
+        if data and all(k in data for k in ['prices', 'market_caps', 'total_volumes']):
+            charts[coin_id] = data
+        time.sleep(throttle_sec)
+
+    for coin_id, data in charts.items():
+        symbol, name = symbol_name_map.get(coin_id, (coin_id, coin_id))
+        prices = data.get('prices', [])
+        mcaps = data.get('market_caps', [])
+        vols = data.get('total_volumes', [])
+        n = min(len(prices), len(mcaps), len(vols))
+        for i in range(1, n - 1):
+            ts, price = prices[i]
+            _, prev_price = prices[i - 1]
+            _, next_price = prices[i + 1]
+            _, mcap = mcaps[i]
+            _, vol = vols[i]
+            pc_24h = ((price - prev_price) / prev_price * 100.0) if prev_price else 0.0
+            if i >= 7:
+                _, price_7d = prices[i - 7]
+                pc_7d = ((price - price_7d) / price_7d * 100.0) if price_7d else 0.0
+            else:
+                pc_7d = 0.0
+            target_next = ((next_price - price) / price * 100.0) if price else 0.0
+            all_rows.append({
+                'timestamp': ts,
+                'symbol': symbol,
+                'name': name,
+                'current_price': price,
+                'market_cap': mcap,
+                'total_volume': vol,
+                'price_change_percentage_24h_in_currency': pc_24h,
+                'price_change_percentage_7d_in_currency': pc_7d,
+                'target_24h_change': target_next
+            })
+
+    if not all_rows:
+        return None
+
+    df = pd.DataFrame(all_rows)
+    df['date'] = pd.to_datetime(df['timestamp'], unit='ms').dt.date
+    df['market_cap_rank'] = df.groupby('date')['market_cap'].rank(ascending=False, method='min')
+    return df
+
 def create_synthetic_training_data(df: pd.DataFrame, num_samples: int = 1000) -> pd.DataFrame:
     """
     Create synthetic training data for model development
@@ -542,58 +672,70 @@ def evaluate_model_performance(model: AdvancedCryptoPredictionModel, test_df: pd
 
 def main():
     """
-    Main function to test the improved model
+    CLI to run either historical backtest training or synthetic demo
     """
+    parser = argparse.ArgumentParser(description="Improved Crypto Prediction Model")
+    parser.add_argument('--backtest', action='store_true', help='Build historical dataset and train')
+    parser.add_argument('--days', type=int, default=60, help='Days of history for backtest')
+    parser.add_argument('--top', type=int, default=20, help='Top N coins for backtest')
+    args = parser.parse_args()
+
+    if args.backtest:
+        print("🚀 Historical Backtest Training")
+        print("=" * 50)
+        print(f"📊 Building dataset: top={args.top}, days={args.days}")
+        hist_df = build_historical_dataset(days=args.days, top_n=args.top)
+        if hist_df is None or hist_df.empty:
+            print("❌ Failed to build historical dataset")
+            return
+        print(f"✅ Historical samples: {len(hist_df)}")
+        model = AdvancedCryptoPredictionModel()
+        print("🎯 Training ensemble models on historical data...")
+        _ = model.train_models(hist_df)
+        print("\n📈 Holdout evaluation (last 10%)...")
+        split_idx = int(len(hist_df) * 0.9)
+        test_df = hist_df.iloc[split_idx:].copy()
+        perf = evaluate_model_performance(model, test_df)
+        for k, v in perf.items():
+            if k == 'n_samples':
+                print(f"📊 {k}: {v}")
+            else:
+                print(f"📈 {k}: {v:.4f}")
+        model_path = os.path.join(os.path.dirname(__file__), "improved_crypto_model.pkl")
+        model.save_model(model_path)
+        print(f"\n✅ Historical model saved to {model_path}")
+        return
+
+    # Synthetic demo fallback
     print("🚀 Testing Improved Crypto Prediction Model")
     print("=" * 50)
-    
-    # Fetch current market data
     print("📊 Fetching market data...")
     market_df = fetch_coingecko_data(100)
-    
     if market_df is None or market_df.empty:
         print("❌ Failed to fetch market data")
         return
-    
     print(f"✅ Loaded {len(market_df)} coins")
-    
-    # Create synthetic training data
     print("🧪 Creating synthetic training data...")
     training_df = create_synthetic_training_data(market_df, num_samples=2000)
     print(f"✅ Created {len(training_df)} training samples")
-    
-    # Initialize and train model
     model = AdvancedCryptoPredictionModel()
-    
     print("🎯 Training ensemble models...")
-    train_scores = model.train_models(training_df)
-    
-    # Create test data
+    _ = model.train_models(training_df)
     test_df = create_synthetic_training_data(market_df, num_samples=500)
-    
-    # Evaluate performance
     print("\n📈 Evaluating model performance...")
     performance = evaluate_model_performance(model, test_df)
-    
     print("\n🎯 Model Performance Metrics:")
     for metric, value in performance.items():
         if metric == 'n_samples':
             print(f"📊 {metric}: {value}")
         else:
             print(f"📈 {metric}: {value:.4f}")
-    
-    # Generate current predictions
     print("\n🔮 Current Market Predictions:")
     current_predictions = model.predict(market_df)
-    
-    # Add predictions to dataframe
     market_df['predicted_24h_change'] = current_predictions
-    
-    # Show top predictions
     top_predictions = market_df.nlargest(10, 'predicted_24h_change')[
         ['symbol', 'name', 'current_price', 'price_change_percentage_24h_in_currency', 'predicted_24h_change']
     ]
-    
     print("\n🚀 Top 10 Predictions:")
     for _, row in top_predictions.iterrows():
         symbol = row['symbol'].upper()
@@ -601,24 +743,18 @@ def main():
         price = row['current_price']
         current_change = row.get('price_change_percentage_24h_in_currency', 0) or 0
         predicted = row['predicted_24h_change']
-        
         print(f"💎 {symbol} ({name})")
         print(f"   💰 Price: ${price:.4f}")
         print(f"   📊 24h: {current_change:+.2f}% → Predicted: {predicted:+.2f}%")
         print()
-    
-    # Show feature importance
     importance = model.get_feature_importance()
     if importance:
         print("🔍 Top Feature Importances:")
         sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10]
         for feature, score in sorted_importance:
             print(f"   {feature}: {score:.4f}")
-    
-    # Save model
     model_path = os.path.join(os.path.dirname(__file__), "improved_crypto_model.pkl")
     model.save_model(model_path)
-    
     print(f"\n✅ Model training completed and saved to {model_path}")
 
 
