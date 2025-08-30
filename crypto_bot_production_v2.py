@@ -22,16 +22,18 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # Import our improved model (project-local)
 from improved_model import AdvancedCryptoPredictionModel
 
-# Setup ultra-clean production logging - suppress all library noise
+# Setup production logging (concise but keeps errors and stacktraces)
 logging.basicConfig(
-    format='%(asctime)s - %(message)s',
-    level=logging.ERROR  # Only show actual errors
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    level=logging.ERROR
 )
 logger = logging.getLogger(__name__)
 
-# Silence all external library logging
-for logger_name in ['httpx', 'telegram', 'urllib3', 'telegram.ext', 'telegram.ext.Application', 'telegram.ext.Updater', 'sklearn']:
+# Reduce noisy libraries but keep error visibility
+for logger_name in ['httpx', 'urllib3', 'sklearn']:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+for logger_name in ['telegram', 'telegram.ext']:
+    logging.getLogger(logger_name).setLevel(logging.ERROR)
 
 # Bot configuration (hard-coded for easy deployment)
 SERVICE_KEY = "8317782014:AAGnV4eXAqc03xtRFg_LuCM3mWJq1uBtPuE"
@@ -668,6 +670,14 @@ def main():
     application.add_handler(CommandHandler("predict", predict))
     application.add_handler(CommandHandler("help", start))
     application.add_handler(CallbackQueryHandler(button_callback))
+
+    # Error handler to log stack traces from handler exceptions
+    async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            logger.exception("Handler exception: %s", context.error)
+        except Exception:
+            pass
+    application.add_error_handler(on_error)
     
     # Start the bot
     print("✅ Enhanced ML Bot online - Clean logs active")
